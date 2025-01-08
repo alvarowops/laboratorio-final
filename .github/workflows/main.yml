@@ -1,0 +1,51 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches:
+      - main
+      - my-feature-branch
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Check out the repository
+      uses: actions/checkout@v2
+
+    - name: Set up Node.js
+      uses: actions/setup-node@v2
+      with:
+        node-version: '14'
+
+    - name: Run SAST with SonarCloud
+      uses: sonarsource/sonarcloud-github-action@master
+      with:
+        projectBaseDir: .
+        args: >
+          -Dsonar.organization=<your-organization>
+          -Dsonar.projectKey=<your-project-key>
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+
+    - name: Run SCA with Dependency-Check
+      run: |
+        mkdir dependency-check
+        curl -L https://github.com/jeremylong/DependencyCheck/releases/download/v6.1.5/dependency-check-6.1.5-release.zip -o dependency-check.zip
+        unzip dependency-check.zip -d dependency-check
+        dependency-check/bin/dependency-check.sh --project "My Project" --scan . --format "ALL" --out dependency-check-report
+      continue-on-error: false
+
+    - name: Build Docker image
+      run: docker build -t my-app .
+
+    - name: Run Image Security with Trivy
+      run: docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy image --severity HIGH,CRITICAL my-app
+      continue-on-error: false
+
+    - name: Deploy to Minikube
+      run: |
+        minikube start
+        kubectl apply -f k8s/deployment.yaml
+        kubectl apply -f k8s/service.yaml
